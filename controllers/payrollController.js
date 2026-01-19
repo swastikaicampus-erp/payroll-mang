@@ -59,10 +59,42 @@ exports.getAllEmployees = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// 4. Delete Employee
+// 5. Update Employee Details (Edit)
+exports.updateEmployee = async (req, res) => {
+    try {
+        const { id } = req.params; // MongoDB ki _id se update karne ke liye
+        const updatedData = req.body;
+
+        // new: true ka matlab hai ki response mein updated wala data milega
+        const updatedEmp = await Employee.findByIdAndUpdate(
+            id, 
+            updatedData, 
+            { new: true, runValidators: true }
+        );
+
+        if (!updatedEmp) {
+            return res.status(404).json({ message: "Staff member nahi mila" });
+        }
+
+        res.json({
+            message: "Employee details updated successfully",
+            updatedEmp
+        });
+    } catch (err) {
+        res.status(500).json({ 
+            error: "Update failed", 
+            details: err.message 
+        });
+    }
+};
 exports.deleteEmployee = async (req, res) => {
     try {
-        await Employee.findByIdAndDelete(req.params.id);
-        res.json({ message: "Deleted" });
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        const deleted = await Employee.findByIdAndDelete(req.params.id);
+        if (!deleted) {
+            return res.status(404).json({ message: "Employee not found in Database" });
+        }
+        res.json({ message: "Deleted Successfully" });
+    } catch (err) { 
+        res.status(500).json({ error: err.message }); 
+    }
 };
