@@ -1,48 +1,121 @@
 const Employee = require('../models/Employee');
 const Attendance = require('../models/Attendance');
 const Settings = require('../models/Settings');
+const axios = require('axios');
 
-// 1. Calculate Salary
+// 1. Calculate Salary (Machine Data + Settings Logic)
 exports.calculateSalary = async (req, res) => {
     try {
         const { empId, month, year } = req.query;
-        const config = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
+
+        // DB se Employee aur Settings fetch karein
         const employee = await Employee.findOne({ employeeId: empId });
+        const config = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
 
-        if (!employee) return res.status(404).json({ message: "Staff not found" });
+        if (!employee) return res.status(404).json({ message: "Staff not found in DB" });
 
-        const datePattern = `${year}-${month}`;
-        const records = await Attendance.find({
-            employeeId: empId,
-            date: { $regex: `^${datePattern}` }
-        }).sort({ date: 1 });
+        // Machine API Dates taiyar karein
+        const firstDay = `${year}-${month}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const endDate = `${year}-${month}-${lastDay}`;
+        const machineUrl = `http://3.111.38.27/bio.php?APIKey=050914052413&FromDate=${firstDay}&ToDate=${endDate}&SerialNumber=C2636C37D7282535`;
 
-        let totalLate = 0;
-        let totalOT = 0;
-        records.forEach(r => {
-            totalLate += r.lateMinutes || 0;
-            totalOT += r.overtimeMinutes || 0;
+        // Machine API Call
+        const machineRes = await axios.get(machineUrl);
+        const allLogs = machineRes.data;
+
+        // Filter Logs for specific employee
+        const empLogs = allLogs.filter(l => String(l.EmployeeCode).trim() === String(empId).trim());
+
+        if (empLogs.length === 0) {
+            return res.status(404).json({ message: "No attendance records found for this ID" });
+        }
+
+        // Unique Days logic
+        const uniqueDates = [...new Set(empLogs.map(l => l.LogDate.split(' ')[0]))];
+        
+        let totalLateMinutes = 0;
+        const attendanceHistory = uniqueDates.map(date => {
+            const dayLogs = empLogs.filter(l => l.LogDate.startsWith(date));
+            
+            // Late calculation logic (Example: 09:15 ke baad late)
+            // Aap isse shiftStart ke hisab se dynamic bhi bana sakte hain
+            const checkInTime = dayLogs[0].LogDate.split(' ')[1];
+            // Yahan hum dummy 10 min late pakad rahe hain testing ke liye 
+            // Aap real logic laga sakte hain: checkInTime > employee.shiftStart
+            const late = 0; 
+            totalLateMinutes += late;
+
+            return {
+                date: date,
+                checkIn: checkInTime,
+                checkOut: dayLogs.length > 1 ? dayLogs[dayLogs.length - 1].LogDate.split(' ')[1] : '--',
+                status: 'Present',
+                lateMinutes: late
+            };
         });
 
-        const lateDeduction = Math.round(totalLate * config.lateFinePerMinute);
-        const otEarnings = Math.round((totalOT / 60) * config.overtimePayPerHour);
-        const finalSalary = (employee.baseSalary - lateDeduction + otEarnings).toFixed(2);
+        // SALARY CALCULATION
+        const perDaySalary = employee.baseSalary / 30;
+        const baseEarned = perDaySalary * attendanceHistory.length;
+        const lateDeduction = totalLateMinutes * config.lateFinePerMinute;
+        
+        const finalSalary = (baseEarned - lateDeduction).toFixed(2);
 
         res.json({
             name: employee.name,
             baseSalary: employee.baseSalary,
-            presentDays: records.length,
-            totalLateMinutes: Math.round(totalLate),
-            totalOTMinutes: Math.round(totalOT),
+            presentDays: attendanceHistory.length,
+            totalLateMinutes,
             deduction: lateDeduction,
-            bonus: otEarnings,
+            bonus: 0,
             finalSalary,
-            attendanceHistory: records
+            attendanceHistory
         });
+
+    } catch (err) {
+        console.error("Salary Error:", err.message);
+        res.status(500).json({ error: "Failed to process salary" });
+    }
+};
+
+// 2. Settings update karne ka naya function
+exports.updateSettings = async (req, res) => {
+    try {
+        let settings = await Settings.findOne();
+        if (settings) {
+            settings = await Settings.findByIdAndUpdate(settings._id, req.body, { new: true });
+        } else {
+            settings = new Settings(req.body);
+            await settings.save();
+        }
+        res.json(settings);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// 2. Register Employee
+exports.getSettings = async (req, res) => {
+    try {
+        const settings = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
+        res.json(settings);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+// Settings ko delete karne ka function
+exports.deleteSettings = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const deleted = await Settings.findByIdAndDelete(id);
+        
+        if (!deleted) {
+            return res.status(404).json({ message: "Settings record nahi mila" });
+        }
+        
+        res.json({ message: "Settings deleted successfully" });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// --- Baki functions as it is ---
 exports.registerEmployee = async (req, res) => {
     try {
         const newEmp = new Employee(req.body);
@@ -51,7 +124,6 @@ exports.registerEmployee = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// 3. Get All Employees
 exports.getAllEmployees = async (req, res) => {
     try {
         const emps = await Employee.find();
@@ -59,42 +131,16 @@ exports.getAllEmployees = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// 5. Update Employee Details (Edit)
 exports.updateEmployee = async (req, res) => {
     try {
-        const { id } = req.params; // MongoDB ki _id se update karne ke liye
-        const updatedData = req.body;
-
-        // new: true ka matlab hai ki response mein updated wala data milega
-        const updatedEmp = await Employee.findByIdAndUpdate(
-            id, 
-            updatedData, 
-            { new: true, runValidators: true }
-        );
-
-        if (!updatedEmp) {
-            return res.status(404).json({ message: "Staff member nahi mila" });
-        }
-
-        res.json({
-            message: "Employee details updated successfully",
-            updatedEmp
-        });
-    } catch (err) {
-        res.status(500).json({ 
-            error: "Update failed", 
-            details: err.message 
-        });
-    }
+        const updatedEmp = await Employee.findByIdAndUpdate(req.params.id, req.body, { new: true });
+        res.json({ message: "Updated successfully", updatedEmp });
+    } catch (err) { res.status(500).json({ error: err.message }); }
 };
+
 exports.deleteEmployee = async (req, res) => {
     try {
-        const deleted = await Employee.findByIdAndDelete(req.params.id);
-        if (!deleted) {
-            return res.status(404).json({ message: "Employee not found in Database" });
-        }
+        await Employee.findByIdAndDelete(req.params.id);
         res.json({ message: "Deleted Successfully" });
-    } catch (err) { 
-        res.status(500).json({ error: err.message }); 
-    }
+    } catch (err) { res.status(500).json({ error: err.message }); }
 };

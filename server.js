@@ -7,6 +7,8 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
+
+
 // MongoDB Connection
 const dbURI = 'mongodb+srv://payroll_sys:payroll_sys1010@cluster0.dp8r3pt.mongodb.net/test?retryWrites=true&w=majority&appName=Cluster0';
 
