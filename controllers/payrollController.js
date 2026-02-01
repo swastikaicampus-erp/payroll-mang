@@ -3,6 +3,8 @@ const Attendance = require('../models/Attendance');
 const Settings = require('../models/Settings');
 const axios = require('axios');
 
+const multer = require('multer');
+const path = require('path');
 // 1. Calculate Salary (Machine Data + Settings Logic)
 exports.calculateSalary = async (req, res) => {
     try {
@@ -99,6 +101,8 @@ exports.getSettings = async (req, res) => {
         res.json(settings);
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
+
+
 // Settings ko delete karne ka function
 exports.deleteSettings = async (req, res) => {
     try {
@@ -114,14 +118,33 @@ exports.deleteSettings = async (req, res) => {
         res.status(500).json({ error: err.message });
     }
 };
+const storage = multer.diskStorage({
+    destination: './uploads/',
+    filename: (req, file, cb) => {
+        cb(null, `${Date.now()}-${file.originalname}`);
+    }
+});
+
+const upload = multer({ storage });
 
 // --- Baki functions as it is ---
 exports.registerEmployee = async (req, res) => {
     try {
-        const newEmp = new Employee(req.body);
+        const employeeData = { ...req.body };
+
+        // If files are uploaded, add their paths to the data object
+        if (req.files) {
+            if (req.files.profilePhoto) employeeData.profilePhoto = req.files.profilePhoto[0].path;
+            if (req.files.aadharFront) employeeData.aadharFront = req.files.aadharFront[0].path;
+            if (req.files.aadharBack) employeeData.aadharBack = req.files.aadharBack[0].path;
+        }
+
+        const newEmp = new Employee(employeeData);
         await newEmp.save();
-        res.status(201).json(newEmp);
-    } catch (err) { res.status(500).json({ error: err.message }); }
+        res.status(201).json({ message: "Employee registered successfully", newEmp });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
 };
 
 exports.getAllEmployees = async (req, res) => {
