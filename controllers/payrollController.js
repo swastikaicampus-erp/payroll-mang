@@ -1,9 +1,53 @@
 const Employee = require('../models/Employee');
-const Attendance = require('../models/Attendance');
 const Settings = require('../models/Settings');
 const axios = require('axios');
-const multer = require('multer');
-const path = require('path');
+
+exports.registerEmployee = async (req, res) => {
+    try {
+        // req.body se data nikaalein
+        const employeeData = { ...req.body };
+
+        // ⚠️ Zaroori: String values ko Numbers mein convert karein
+        if(employeeData.baseSalary) employeeData.baseSalary = Number(employeeData.baseSalary);
+        if(employeeData.employeeId) employeeData.employeeId = Number(employeeData.employeeId);
+
+        // Files handling
+        if (req.files) {
+            if (req.files.profilePhoto) employeeData.profilePhoto = req.files.profilePhoto[0].path;
+            if (req.files.aadharFront) employeeData.aadharFront = req.files.aadharFront[0].path;
+            if (req.files.aadharBack) employeeData.aadharBack = req.files.aadharBack[0].path;
+        }
+
+        const newEmp = new Employee(employeeData);
+        await newEmp.save();
+        res.status(201).json(newEmp);
+    } catch (err) {
+        console.error("❌ Backend Error:", err);
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// Update Employee (Isme bhi image handling add kar di hai)
+exports.updateEmployee = async (req, res) => {
+    try {
+        const updateData = { ...req.body };
+
+        if (req.files) {
+            if (req.files.profilePhoto) updateData.profilePhoto = req.files.profilePhoto[0].path;
+            if (req.files.aadharFront) updateData.aadharFront = req.files.aadharFront[0].path;
+            if (req.files.aadharBack) updateData.aadharBack = req.files.aadharBack[0].path;
+        }
+
+        const updatedEmp = await Employee.findByIdAndUpdate(req.params.id, updateData, { new: true });
+        res.json({ message: "Updated successfully", updatedEmp });
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+};
+
+// ... (Baki functions CalculateSalary, getAllEmployees, etc. sahi hain unhe rehne dein)
+
+
 // 1. Calculate Salary (Machine Data + Settings Logic)
 exports.calculateSalary = async (req, res) => {
     try {
@@ -127,25 +171,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage });
 
 // --- Baki functions as it is ---
-exports.registerEmployee = async (req, res) => {
-    try {
-        const employeeData = { ...req.body };
 
-        // Agar files upload hui hain toh unka path save karein
-        if (req.files) {
-            if (req.files.profilePhoto) employeeData.profilePhoto = req.files.profilePhoto[0].path;
-            if (req.files.aadharFront) employeeData.aadharFront = req.files.aadharFront[0].path;
-            if (req.files.aadharBack) employeeData.aadharBack = req.files.aadharBack[0].path;
-        }
-
-        const newEmp = new Employee(employeeData);
-        await newEmp.save();
-        res.status(201).json(newEmp);
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: err.message });
-    }
-};
 
 exports.getAllEmployees = async (req, res) => {
     try {
@@ -154,12 +180,7 @@ exports.getAllEmployees = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-exports.updateEmployee = async (req, res) => {
-    try {
-        const updatedEmp = await Employee.findByIdAndUpdate(req.params.id, req.body, { new: true });
-        res.json({ message: "Updated successfully", updatedEmp });
-    } catch (err) { res.status(500).json({ error: err.message }); }
-};
+
 
 exports.deleteEmployee = async (req, res) => {
     try {
