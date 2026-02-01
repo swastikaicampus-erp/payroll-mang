@@ -64,14 +64,18 @@ exports.deleteEmployee = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-// 5. Calculate Salary (Machine Integration)
 exports.calculateSalary = async (req, res) => {
     try {
         const { empId, month, year } = req.query;
         const employee = await Employee.findOne({ employeeId: empId });
-        const config = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
+        
+        // Settings se values uthayein
+        const config = await Settings.findOne() || { 
+            halfDayThresholdHours: 4, 
+            halfDayPayFactor: 0.5 
+        };
 
-        if (!employee) return res.status(404).json({ message: "Staff not found in DB" });
+        if (!employee) return res.status(404).json({ message: "Staff not found" });
 
         const firstDay = `${year}-${month}-01`;
         const lastDay = new Date(year, month, 0).getDate();
@@ -83,18 +87,49 @@ exports.calculateSalary = async (req, res) => {
 
         if (empLogs.length === 0) return res.status(404).json({ message: "No attendance found" });
 
-        const uniqueDates = [...new Set(empLogs.map(l => l.LogDate.split(' ')[0]))];
+        // --- Naya Calculation Logic ---
+        let totalAdjustedDays = 0;
+        const logsByDate = {};
+
+        // 1. Logs ko date wise group karein
+        empLogs.forEach(log => {
+            const date = log.LogDate.split(' ')[0];
+            if (!logsByDate[date]) logsByDate[date] = [];
+            logsByDate[date].push(new Date(log.LogDate));
+        });
+
+        // 2. Har din ka working hours nikalein
+        Object.keys(logsByDate).forEach(date => {
+            const dayLogs = logsByDate[date].sort((a, b) => a - b);
+            const checkIn = dayLogs[0];
+            const checkOut = dayLogs[dayLogs.length - 1];
+            
+            const diffInMs = checkOut - checkIn;
+            const hoursWorked = diffInMs / (1000 * 60 * 60);
+
+            if (hoursWorked >= 8) {
+                totalAdjustedDays += 1; // Full Day
+            } else if (hoursWorked >= config.halfDayThresholdHours) {
+                totalAdjustedDays += config.halfDayPayFactor; // Half Day (e.g. 0.5)
+            } else {
+                // Agar threshold se bhi kam hai toh ignore (Absent)
+                totalAdjustedDays += 0;
+            }
+        });
+
         const perDaySalary = employee.baseSalary / 30;
-        const finalSalary = (perDaySalary * uniqueDates.length).toFixed(2);
+        const finalSalary = (perDaySalary * totalAdjustedDays).toFixed(2);
 
         res.json({
             name: employee.name,
             baseSalary: employee.baseSalary,
-            presentDays: uniqueDates.length,
+            calculatedDays: totalAdjustedDays, // Yeh ab 20.5 jaisa dikh sakta hai
             finalSalary,
-            attendanceHistory: uniqueDates
+            month,
+            year
         });
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: "Salary process failed" });
     }
 };
