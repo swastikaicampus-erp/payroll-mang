@@ -1,3 +1,4 @@
+const multer = require('multer');
 const Employee = require('../models/Employee');
 const Settings = require('../models/Settings');
 const axios = require('axios');
