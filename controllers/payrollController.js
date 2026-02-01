@@ -2,7 +2,6 @@ const Employee = require('../models/Employee');
 const Attendance = require('../models/Attendance');
 const Settings = require('../models/Settings');
 const axios = require('axios');
-
 const multer = require('multer');
 const path = require('path');
 // 1. Calculate Salary (Machine Data + Settings Logic)
@@ -132,7 +131,7 @@ exports.registerEmployee = async (req, res) => {
     try {
         const employeeData = { ...req.body };
 
-        // If files are uploaded, add their paths to the data object
+        // Agar files upload hui hain toh unka path save karein
         if (req.files) {
             if (req.files.profilePhoto) employeeData.profilePhoto = req.files.profilePhoto[0].path;
             if (req.files.aadharFront) employeeData.aadharFront = req.files.aadharFront[0].path;
@@ -141,8 +140,9 @@ exports.registerEmployee = async (req, res) => {
 
         const newEmp = new Employee(employeeData);
         await newEmp.save();
-        res.status(201).json({ message: "Employee registered successfully", newEmp });
+        res.status(201).json(newEmp);
     } catch (err) {
+        console.error(err);
         res.status(500).json({ error: err.message });
     }
 };
