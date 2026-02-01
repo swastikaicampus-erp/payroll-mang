@@ -1,18 +1,19 @@
-const multer = require('multer');
 const Employee = require('../models/Employee');
 const Settings = require('../models/Settings');
 const axios = require('axios');
+// Zaroori: Multer ko yahan require karna hoga agar niche storage use kar rahe ho
+const multer = require('multer'); 
 
+// 1. Register Employee
 exports.registerEmployee = async (req, res) => {
     try {
-        // req.body se data nikaalein
         const employeeData = { ...req.body };
 
-        // ⚠️ Zaroori: String values ko Numbers mein convert karein
+        // Types fix karein (String to Number)
         if(employeeData.baseSalary) employeeData.baseSalary = Number(employeeData.baseSalary);
         if(employeeData.employeeId) employeeData.employeeId = Number(employeeData.employeeId);
 
-        // Files handling
+        // Files paths save karein
         if (req.files) {
             if (req.files.profilePhoto) employeeData.profilePhoto = req.files.profilePhoto[0].path;
             if (req.files.aadharFront) employeeData.aadharFront = req.files.aadharFront[0].path;
@@ -23,15 +24,16 @@ exports.registerEmployee = async (req, res) => {
         await newEmp.save();
         res.status(201).json(newEmp);
     } catch (err) {
-        console.error("❌ Backend Error:", err);
+        console.error("❌ Register Error:", err);
         res.status(500).json({ error: err.message });
     }
 };
 
-// Update Employee (Isme bhi image handling add kar di hai)
+// 2. Update Employee
 exports.updateEmployee = async (req, res) => {
     try {
         const updateData = { ...req.body };
+        if(updateData.baseSalary) updateData.baseSalary = Number(updateData.baseSalary);
 
         if (req.files) {
             if (req.files.profilePhoto) updateData.profilePhoto = req.files.profilePhoto[0].path;
@@ -46,134 +48,7 @@ exports.updateEmployee = async (req, res) => {
     }
 };
 
-// ... (Baki functions CalculateSalary, getAllEmployees, etc. sahi hain unhe rehne dein)
-
-
-// 1. Calculate Salary (Machine Data + Settings Logic)
-exports.calculateSalary = async (req, res) => {
-    try {
-        const { empId, month, year } = req.query;
-
-        // DB se Employee aur Settings fetch karein
-        const employee = await Employee.findOne({ employeeId: empId });
-        const config = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
-
-        if (!employee) return res.status(404).json({ message: "Staff not found in DB" });
-
-        // Machine API Dates taiyar karein
-        const firstDay = `${year}-${month}-01`;
-        const lastDay = new Date(year, month, 0).getDate();
-        const endDate = `${year}-${month}-${lastDay}`;
-        const machineUrl = `http://3.111.38.27/bio.php?APIKey=050914052413&FromDate=${firstDay}&ToDate=${endDate}&SerialNumber=C2636C37D7282535`;
-
-        // Machine API Call
-        const machineRes = await axios.get(machineUrl);
-        const allLogs = machineRes.data;
-
-        // Filter Logs for specific employee
-        const empLogs = allLogs.filter(l => String(l.EmployeeCode).trim() === String(empId).trim());
-
-        if (empLogs.length === 0) {
-            return res.status(404).json({ message: "No attendance records found for this ID" });
-        }
-
-        // Unique Days logic
-        const uniqueDates = [...new Set(empLogs.map(l => l.LogDate.split(' ')[0]))];
-        
-        let totalLateMinutes = 0;
-        const attendanceHistory = uniqueDates.map(date => {
-            const dayLogs = empLogs.filter(l => l.LogDate.startsWith(date));
-            
-            // Late calculation logic (Example: 09:15 ke baad late)
-            // Aap isse shiftStart ke hisab se dynamic bhi bana sakte hain
-            const checkInTime = dayLogs[0].LogDate.split(' ')[1];
-            // Yahan hum dummy 10 min late pakad rahe hain testing ke liye 
-            // Aap real logic laga sakte hain: checkInTime > employee.shiftStart
-            const late = 0; 
-            totalLateMinutes += late;
-
-            return {
-                date: date,
-                checkIn: checkInTime,
-                checkOut: dayLogs.length > 1 ? dayLogs[dayLogs.length - 1].LogDate.split(' ')[1] : '--',
-                status: 'Present',
-                lateMinutes: late
-            };
-        });
-
-        // SALARY CALCULATION
-        const perDaySalary = employee.baseSalary / 30;
-        const baseEarned = perDaySalary * attendanceHistory.length;
-        const lateDeduction = totalLateMinutes * config.lateFinePerMinute;
-        
-        const finalSalary = (baseEarned - lateDeduction).toFixed(2);
-
-        res.json({
-            name: employee.name,
-            baseSalary: employee.baseSalary,
-            presentDays: attendanceHistory.length,
-            totalLateMinutes,
-            deduction: lateDeduction,
-            bonus: 0,
-            finalSalary,
-            attendanceHistory
-        });
-
-    } catch (err) {
-        console.error("Salary Error:", err.message);
-        res.status(500).json({ error: "Failed to process salary" });
-    }
-};
-
-// 2. Settings update karne ka naya function
-exports.updateSettings = async (req, res) => {
-    try {
-        let settings = await Settings.findOne();
-        if (settings) {
-            settings = await Settings.findByIdAndUpdate(settings._id, req.body, { new: true });
-        } else {
-            settings = new Settings(req.body);
-            await settings.save();
-        }
-        res.json(settings);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-};
-
-exports.getSettings = async (req, res) => {
-    try {
-        const settings = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
-        res.json(settings);
-    } catch (err) { res.status(500).json({ error: err.message }); }
-};
-
-
-// Settings ko delete karne ka function
-exports.deleteSettings = async (req, res) => {
-    try {
-        const { id } = req.params;
-        const deleted = await Settings.findByIdAndDelete(id);
-        
-        if (!deleted) {
-            return res.status(404).json({ message: "Settings record nahi mila" });
-        }
-        
-        res.json({ message: "Settings deleted successfully" });
-    } catch (err) {
-        res.status(500).json({ error: err.message });
-    }
-};
-const storage = multer.diskStorage({
-    destination: './uploads/',
-    filename: (req, file, cb) => {
-        cb(null, `${Date.now()}-${file.originalname}`);
-    }
-});
-
-const upload = multer({ storage });
-
-// --- Baki functions as it is ---
-
-
+// 3. Get All Employees
 exports.getAllEmployees = async (req, res) => {
     try {
         const emps = await Employee.find();
@@ -181,11 +56,75 @@ exports.getAllEmployees = async (req, res) => {
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
 
-
-
+// 4. Delete Employee
 exports.deleteEmployee = async (req, res) => {
     try {
         await Employee.findByIdAndDelete(req.params.id);
         res.json({ message: "Deleted Successfully" });
     } catch (err) { res.status(500).json({ error: err.message }); }
 };
+
+// 5. Calculate Salary (Machine Integration)
+exports.calculateSalary = async (req, res) => {
+    try {
+        const { empId, month, year } = req.query;
+        const employee = await Employee.findOne({ employeeId: empId });
+        const config = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
+
+        if (!employee) return res.status(404).json({ message: "Staff not found in DB" });
+
+        const firstDay = `${year}-${month}-01`;
+        const lastDay = new Date(year, month, 0).getDate();
+        const endDate = `${year}-${month}-${lastDay}`;
+        const machineUrl = `http://3.111.38.27/bio.php?APIKey=050914052413&FromDate=${firstDay}&ToDate=${endDate}&SerialNumber=C2636C37D7282535`;
+
+        const machineRes = await axios.get(machineUrl);
+        const empLogs = machineRes.data.filter(l => String(l.EmployeeCode).trim() === String(empId).trim());
+
+        if (empLogs.length === 0) return res.status(404).json({ message: "No attendance found" });
+
+        const uniqueDates = [...new Set(empLogs.map(l => l.LogDate.split(' ')[0]))];
+        const perDaySalary = employee.baseSalary / 30;
+        const finalSalary = (perDaySalary * uniqueDates.length).toFixed(2);
+
+        res.json({
+            name: employee.name,
+            baseSalary: employee.baseSalary,
+            presentDays: uniqueDates.length,
+            finalSalary,
+            attendanceHistory: uniqueDates
+        });
+    } catch (err) {
+        res.status(500).json({ error: "Salary process failed" });
+    }
+};
+
+// 6. Settings Functions
+exports.getSettings = async (req, res) => {
+    try {
+        const settings = await Settings.findOne() || { lateFinePerMinute: 2, overtimePayPerHour: 150 };
+        res.json(settings);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+exports.updateSettings = async (req, res) => {
+    try {
+        const settings = await Settings.findOneAndUpdate({}, req.body, { upsert: true, new: true });
+        res.json(settings);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+exports.deleteSettings = async (req, res) => {
+    try {
+        await Settings.findByIdAndDelete(req.params.id);
+        res.json({ message: "Settings deleted successfully" });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+};
+
+// --- Multer Storage (Backup for Route Middleware) ---
+const storage = multer.diskStorage({
+    destination: './uploads/',
+    filename: (req, file, cb) => {
+        cb(null, `${Date.now()}-${file.originalname}`);
+    }
+});
